@@ -1,0 +1,386 @@
+---
+title: "Daily Training Report"
+output: flexdashboard::flex_dashboard
+---
+
+```{r setup, include=FALSE}
+
+library(flexdashboard)
+library(tidyverse)
+library(plotly)
+library(MNTSportScience)
+library(lubridate)
+
+source('TEMP.R')
+
+#All Days dd-mm-yyyy
+campDateStart <- '21-03-2021'
+campDateEnd <- '29-03-2021'
+sessionDate <- '28-03-2021'
+campName <- 'March 2021 - Austria & Ireland'
+
+#Connection to MYSQL in Amazon
+  # amzCon <- create_amz_mysql_con()
+
+#Connection to sqlite
+  # sqliteCon <- create_local_sqlite_con(dbName = "D:/statsports/statsports.sqlite")
+
+#Connection to Smartabase 
+  # Do Something
+
+
+#Get Camp Data - 
+
+  #This is temporary
+  ssDrill <- choose.files(
+      default = 'C:\\Users\\jorda\\Box Sync\\SS DTR Exports\\historical camps',
+      multi = TRUE
+    ) %>% 
+    map(read_csv) %>% 
+    reduce(bind_rows) %>% 
+    mutate_if(is.character, ~gsub('[^ -~]', '', .)) %>% 
+    convert_sonra_export_to_ss()  %>% 
+    mutate(position = convert_pos_num_to_name(position)) %>% 
+    convert_ss_to_ssDrill(ss) %>% 
+    mutate(
+      hsr_cnt = vel_z5_cnt, vel_z6_cnt,
+      acc_dist = acc_z4_dist + acc_z5_dist + acc_z6_dist,
+      dec_dist = dec_z4_dist + dec_z5_dist + dec_z6_dist,
+      acc_cnt = acc_z4_cnt + acc_z5_cnt + acc_z6_cnt,
+      dec_cnt = dec_z4_cnt + dec_z5_cnt + dec_z6_cnt,
+      exp_dist = acc_dist + dec_dist,
+      exp_cnt = acc_cnt + dec_dist
+    )
+
+ 
+metricNames <- c ("dur",
+  "dist", 
+  "hml_dist", "hml_cnt", 
+  "hsr_dist", "hsr_cnt",
+  "vel_z5_dist", "vel_z6_dist", "vel_z5_cnt", "vel_z6_cnt",
+  "exp_dist", "exp_cnt",
+  "acc_dist", "dec_dist", "acc_cnt", "dec_cnt")
+
+  ssSession <- ssDrill %>% 
+    select(
+      drill_date, sess_type, session_title,
+      drill_start_time, drill_end_time,
+      name_display, position,
+      dur,
+      dist, 
+      hml_dist, hml_cnt, 
+      hsr_dist, hsr_cnt,
+      vel_z5_dist, vel_z6_dist, vel_z5_cnt, vel_z6_cnt,
+      exp_dist, exp_cnt,
+      acc_dist, dec_dist, acc_cnt, dec_cnt
+    ) %>% 
+    group_by(drill_date, sess_type, session_title, name_display, position) %>%
+    summarise(.groups = 'keep', 
+      across(all_of(metricNames), sum),
+      session_start_time = sort(drill_start_time, decreasing = F) %>% .[1],
+      session_end_time = sort(drill_end_time, decreasing = T) %>% .[1]
+    ) %>%
+    ungroup() %>% 
+    rename(dur_drill = dur) %>% 
+    mutate(dur_session = (session_end_time - session_start_time) %>% as.numeric() / 60)
+  
+#Get Camp Planner Data - 
+
+#Create plotl.y - 
+  #should i move this to a function?
+
+
+
+```
+
+# Camp Overview {data-orientation="rows"}
+
+Inputs {.sidebar}
+-------------------------------------
+
+```{r}
+# shiny inputs defined here
+```
+
+Column
+-------------------------------------
+
+### Chart 1 
+
+```{r message=FALSE, warning=FALSE}
+
+  #Create Plotly Of Camp
+
+  mNames <- c("dur_drill","dist","hml_dist", "hsr_dist", "vel_z6_dist", "exp_dist", "acc_cnt", "dec_cnt")
+
+ ssTeam <- ssSession %>% 
+    filter(position != 'GK') %>% 
+    select(drill_date, sess_type, session_title, all_of(mNames)) %>% 
+    pivot_longer(cols = mNames, names_to = 'metric') %>% 
+    group_by(drill_date, sess_type, session_title, metric) %>% 
+    summarise(.groups = 'keep',
+      ci = list(mean_cl_boot(value))
+    ) %>%
+    unnest(ci) %>% 
+    rename(mean=y, lwr=ymin, upr=ymax) 
+ 
+  ssPosition <- ssSession %>% 
+    select(drill_date, sess_type, session_title, position, all_of(mNames)) %>% 
+    pivot_longer(cols = mNames, names_to = 'metric') %>% 
+    group_by(drill_date, sess_type, session_title, position, metric) %>% 
+    summarise(.groups = 'keep',
+      ci = list(mean_cl_boot(value))
+    ) %>%
+    unnest(ci) %>% 
+    rename(mean=y, lwr=ymin, upr=ymax)
+  
+  gg <- ssTeam %>% 
+    mutate(
+      drill_date = factor(drill_date)
+    ) %>% 
+    ggplot(data = .) +
+      geom_col(aes(x = drill_date, y = mean), width = .3) +
+      geom_errorbar(aes(x = drill_date, y = mean, ymin = lwr, ymax = upr), width = .1) +
+      geom_rect(
+        aes(
+          xmin = as.numeric(drill_date)-.2,
+          xmax = as.numeric(drill_date)+.2,
+          ymin = mean*1.1,
+          ymax = mean*.9
+        ),
+        alpha = .25,
+        width = .4
+      ) +
+      facet_grid(rows = vars(metric), scales = 'free_y')
+  
+  gg %>% ggplotly()
+
+
+```
+
+# Session Overview {data-orientation="rows"}
+
+Inputs {.sidebar}
+-------------------------------------
+
+```{r}
+# shiny inputs defined here
+```
+
+Row {data-height="150"}
+-------------------------------------
+
+### Chart 1
+
+```{r}
+
+# Create Drill Start Time -------------------------------------------------
+  timeChartData <- ssDrill %>% 
+    filter(!is.na(drill_type)) %>%
+    filter(position != 'GK') %>% 
+    select(
+      session_title,
+      dist,
+      drill_date, 
+      drill_title,
+      drill_type, 
+      drill_variation,
+      drill_num,
+      drill_start_time, 
+      drill_end_time
+    ) %>% 
+    rowwise() %>% 
+    mutate(
+      drill_label = na.omit(c(drill_type, drill_variation, drill_num)) %>% as.vector() %>% paste(.,collapse = ' - ')
+    ) %>% 
+    select(
+      session_title, drill_date, drill_title, drill_label, dist, drill_start_time, drill_end_time
+    ) %>% 
+    group_by(session_title, drill_date, drill_title, drill_label) %>% 
+    summarise(.groups = 'keep',
+      dist = mean(dist, na.rm = T),
+      drill_start_time = drill_start_time %>% sort(decreasing = T) %>% .[1],
+      drill_end_time = drill_end_time %>% sort(decreasing = F) %>% .[1]
+    ) %>% 
+    ungroup() %>% 
+    mutate(
+      drill_mean_time = (drill_start_time + drill_end_time) / 2
+    )
+  
+  gg <- timeChartData %>% 
+    filter(drill_date == '2021-03-23') %>%
+    ungroup() %>%
+    ggplot() +
+      geom_rect(aes(
+        xmin = drill_start_time, 
+        xmax = drill_end_time, 
+        ymin = 0, 
+        ymax = dist, 
+        fill = drill_label,
+        group = drill_title
+      ))
+      
+  
+  ggplotly(gg)
+     
+```
+
+### Chart 2
+
+```{R}
+
+#Session Total Time
+x <- ssDrill %>% 
+  filter(position != 'GK') %>% 
+  filter(!is.na(drill_type)) %>% 
+  select(
+    session_title,
+    drill_date, 
+    drill_title,
+    drill_start_time, 
+    drill_end_time
+  ) %>% 
+  mutate(
+    drillTimeRange = map2(.x = drill_start_time, .y = drill_end_time, .f = ~{.x:.y})
+  ) %>%  
+  group_by(session_title, drill_date) %>% 
+  mutate(
+    session_start_time = drill_start_time %>% sort(decreasing = F) %>% .[1],
+    session_end_time = drill_end_time %>% sort(decreasing = T) %>% .[1]
+  ) %>% 
+  select(-drill_start_time, -drill_end_time) %>%  
+  ungroup() %>% 
+  group_by(session_title, session_start_time, session_end_time, drill_date) %>% 
+  summarise(.groups = 'keep',
+    drillTimeRange = drillTimeRange %>% unlist() %>% unique() %>% c() %>% list,
+  ) %>% 
+  ungroup() %>% 
+  mutate(
+    sessionTimeRange = map2(.x = session_start_time, .y = session_end_time, .f = ~{.x:.y}),
+    sessionTimeCategory =  map2(.x = drillTimeRange, .y = sessionTimeRange, .f = ~{.y %in% .x}),
+    inactiveTimeMin = map2_dbl(.x = drillTimeRange, .y = sessionTimeRange, .f = ~{.y[.y %!in% .x] %>% length()/60}),
+    totalTimeMin = as.numeric(session_end_time - session_start_time)/60 %>% round(.,0),
+    activeTimeMin = totalTimeMin-inactiveTimeMin,
+    activeTimePct = (activeTimeMin / totalTimeMin) %>% round(.,2) * 100
+  )  
+
+
+gg <- x %>% 
+  filter(drill_date == '2021-03-23') %>% 
+  select(session_title, inactiveTimeMin, activeTimeMin, activeTimePct) %>% 
+  pivot_longer(cols = c(activeTimeMin, inactiveTimeMin)) %>% 
+  ggplot() + 
+    geom_col(position = 'stack', aes(x = value, y = session_title, fill = name)) 
+
+ggplotly(gg)
+
+
+```
+
+Row
+-------------------------------------
+
+### Chart 3
+
+```{r}
+
+mNames <- c("dur", "dist","hml_dist", "hsr_dist", "vel_z6_dist", "exp_dist", "acc_cnt", "dec_cnt")
+
+ssDrill2 <- ssDrill %>% 
+  filter(position != 'GK') %>% 
+  select(session_title, session_date, drill_name_full, drill_name_short, position, name_display, dur, all_of(mNames)) %>% 
+  pivot_longer(cols = mNames, names_to = 'metric') %>% 
+  group_by(session_date, session_title, drill_name_full, drill_name_short, metric) %>% 
+  summarise(.groups = 'keep', ci = list(mean_cl_boot(value))) %>%
+  unnest(ci) %>% 
+  rename(mean=y, lwr=ymin, upr=ymax) 
+
+ssTeam <- ssDrill2 %>% 
+  group_by(session_date, session_title, metric) %>% 
+  summarise(.groups = 'keep',
+    mean = sum(mean),
+    lwr = sum(lwr),
+    upr = sum(upr)
+  ) %>% 
+  rowwise() %>% 
+  mutate(target = runif(1, min = mean * .75, mean * 1.25) %>% round(., 1)) %>% 
+  ungroup()
+
+gg <- ssDrill2 %>% 
+  filter(session_date == '2021-03-22') %>% 
+  ungroup() %>% 
+  ggplot() +
+    geom_col(aes(x = mean, y = metric, fill = drill_name_short)) +
+    geom_segment(
+      data = ssTeam %>% filter(session_date == '2021-03-22'),
+      aes(
+        y = .50,
+        yend = 1.50,
+        x = target,
+        xend = target
+      ),
+      show.legend = TRUE,
+      linetype = 'dotted',
+    ) +
+    facet_wrap(metric ~ ., scales="free", ncol = 1) +
+    theme(
+      strip.background = element_blank(),
+      strip.text.x = element_blank(),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      legend.title = element_blank()
+    )
+
+ggplotly(gg)
+
+```
+
+
+# Drill Overview {data-orientation="rows"}
+
+Inputs {.sidebar}
+-------------------------------------
+
+
+Row
+-------------------------------------
+
+### Drill Interval
+
+```{r}
+  
+
+mNames <- c("dist","hml_dist", "hsr_dist", "vel_z6_dist", "exp_dist", "acc_cnt", "dec_cnt")
+
+ssDrill2 <- ssDrill %>% 
+  filter(position != 'GK') %>% 
+  filter(session_date == '2021-03-22') %>%
+  filter(drill_name_short == 'DP - 5V5+1N - 24X20 GGG_GGG') %>% 
+  select(drill_title, drill_name_short, drill_int, position, name_display, dur, all_of(mNames)) %>% 
+  pivot_longer(cols = mNames, names_to = 'metric') %>% 
+  ungroup() %>% 
+  mutate(value = value / dur)
+  
+
+gg <- ssDrill2 %>% 
+  ggplot() + 
+  geom_boxplot(aes(x = drill_int, y = value)) +
+  facet_wrap(facets = vars(metric),  scales = 'free') 
+
+ggplotly(gg)
+  
+  
+  
+
+  
+
+```
+
+### Chart 2
+
+Row
+-------------------------------------
+
+### Chart 4
+
+### Chart 5
