@@ -1,187 +1,699 @@
 ---
-title: "Daily Training Report"
-output: flexdashboard::flex_dashboard
+title: "DTR"
+output:
+  flexdashboard::flex_dashboard:
+    logo: USSF-Primary48.png
+    vertical_layout: scroll
+    orientation: rows
+    css: mytheme.css
 ---
 
 ```{r setup, include=FALSE}
 
-library(flexdashboard)
-library(tidyverse)
-library(plotly)
-library(MNTSportScience)
-library(lubridate)
+  library(flexdashboard)
+  library(tidyverse)
+  library(plotly)
+  library(MNTSportScience)
+  library(readxl)
+  library(lubridate)
+  library(reactable)
+  library(htmltools)
+  library(glue)
+  library(neon)
+  library(RColorBrewer)
+  library(crosstalk)
+  
+  #Statsports functions
+  #I need to move these functions to the MNTSportScience Package
+    source('TEMP.R')
 
-source('TEMP.R')
+  #General Dates - yyyy-mm-dd
+    campDateStart <- '2021-03-21' %>% as.Date()
+    campDateEnd <- '2021-03-26' %>% as.Date()
+    sessionDate <- '2021-03-23' %>% as.Date()
+    sessionMatchDay <- 'MD+1'
+    
+  #Session Title
+    pageTitle <- glue("DTR | {format(sessionDate,'%b-%d-%y')} | {sessionMatchDay}")
+  
+  #Connection to MYSQL in Amazon
+    # amzCon <- create_amz_mysql_con()
+  
+  #Connection to sqlite
+    # sqliteCon <- create_local_sqlite_con(dbName = "D:/statsports/statsports.sqlite")
 
-#All Days dd-mm-yyyy
-campDateStart <- '21-03-2021'
-campDateEnd <- '29-03-2021'
-sessionDate <- '28-03-2021'
-campName <- 'March 2021 - Austria & Ireland'
-
-#Connection to MYSQL in Amazon
-  # amzCon <- create_amz_mysql_con()
-
-#Connection to sqlite
-  # sqliteCon <- create_local_sqlite_con(dbName = "D:/statsports/statsports.sqlite")
-
-#Connection to Smartabase 
-  # Do Something
-
-
-#Get Camp Data - 
-
-  #This is temporary
-  ssDrill <- choose.files(
-      default = 'C:\\Users\\jorda\\Box Sync\\SS DTR Exports\\historical camps',
-      multi = TRUE
+    #Smartabase RPE 
+    rpe <- pull_smartabase(
+      form       = 'MNT RPE',
+      start_date = format(campDateStart, "%d/%m/%Y"),
+      end_date   = format(campDateEnd, "%d/%m/%Y"), 
+      filter_user_key = "group", 
+      filter_user_value = "USMNT - Current"
+    ) %>% select(
+      `Last Name`, 
+      `First Name`,
+      `Date` = start_date, 
+      `RPE` = `RPE Score`,
+      `AM/PM` = `Session Type`
+    ) %>% mutate(
+      Weekday = weekdays(dmy(Date)),
+      Date = dmy(Date),
+      `RPE Adjusted` = RPE / 2
     ) %>% 
-    map(read_csv) %>% 
-    reduce(bind_rows) %>% 
-    mutate_if(is.character, ~gsub('[^ -~]', '', .)) %>% 
-    convert_sonra_export_to_ss()  %>% 
-    mutate(position = convert_pos_num_to_name(position)) %>% 
-    convert_ss_to_ssDrill(ss) %>% 
+    tibble()
+
+  #Get Score Inputs
+    scoreInput <-  read_excel("C:/Users/jorda/Box Sync/Analytics/Daily Training Report-USMNT (New).xlsx", 
+      sheet = "Score Inputs", col_types = c("text", 
+          "numeric", "numeric", "numeric", 
+          "numeric", "numeric", "skip", "numeric", 
+          "numeric", "numeric", "numeric", 
+          "numeric", "numeric", "skip", "numeric", 
+          "numeric", "numeric", "numeric", 
+          "numeric", "numeric", "numeric", 
+          "numeric", "numeric", "numeric"), 
+      skip = 1) %>% rename(
+      name_last = `...1`,
+      dist = `Distance Total`,
+      dist_min = `Distance Per Minute`,
+      mp_avg = `Avg Metabolic Loading Dist`,
+      hml_dist = `High Metabolic Loading Dist`,
+      vel_z6_dist = `Speed Zone 6`,
+      hsr_dist = `High Speed Running`,
+      si = `Speed Intensity`,
+      hml_dist_min = `High Metabolic Loading Per Min`,
+      hsr_dist_min = `High Speed Running Per Min`,
+      si_min = `Speed Intensity Per Min`,
+      exp_dist = `Explosive Dist`,
+      dsl = `Dynamic Stress Load`,
+      dsl_min = `Dynamic Stress Load Per Min`,
+      acc_z36_cnt = `Accels Z3 - Z6`,
+      acc_z46_cnt = `Accels Z4 - Z6`,
+      dec_z36_cnt = `Decels Z3 - Z6`,
+      dec_z46_cnt = `Decels Z4 - Z6`,
+      hr_z6_dur = `Time in HR Zone 6`,
+      hr_z56_dur = `Time in Red Zone`,
+      hre  = `Heart Rate Exertion`,
+      hre_min = `HRE Per Minute`
+    ) %>% 
+    rename_with(.fn = ~ paste0("score_", .x)) %>% 
+    rename(name_last = score_name_last) %>% 
     mutate(
-      hsr_cnt = vel_z5_cnt, vel_z6_cnt,
-      acc_dist = acc_z4_dist + acc_z5_dist + acc_z6_dist,
-      dec_dist = dec_z4_dist + dec_z5_dist + dec_z6_dist,
-      acc_cnt = acc_z4_cnt + acc_z5_cnt + acc_z6_cnt,
-      dec_cnt = dec_z4_cnt + dec_z5_cnt + dec_z6_cnt,
-      exp_dist = acc_dist + dec_dist,
-      exp_cnt = acc_cnt + dec_dist
+      x = name_last
     )
+    
+  #Get Select GPS CSV Files
+  # ssDrill <- choose.files(
+  #     default = 'C:\\Users\\jorda\\Box Sync\\SS DTR Exports\\historical camps',
+  #     multi = TRUE
+  #   ) %>% 
+  ssDrill <- list("C:\\Users\\jorda\\Box Sync\\SS DTR Exports\\Historical Camps\\Sonra\\Sonra Mar21.csv") %>% 
+      map(read_csv) %>% 
+      reduce(bind_rows) %>% 
+      mutate_if(is.character, ~gsub('[^ -~]', '', .)) %>% 
+      convert_sonra_export_to_ss()  %>% 
+      mutate(position = convert_pos_num_to_name(position)) %>% 
+      convert_ss_to_ssDrill(ss) %>% 
+      rowwise() %>% 
+      mutate(
+        drill_label = na.omit(c(drill_type, drill_variation, drill_num)) %>% as.vector() %>% paste(.,collapse = ' - '),
+        hsr_cnt = vel_z5_cnt, vel_z6_cnt,
+        acc_cnt = acc_z4_cnt + acc_z5_cnt + acc_z6_cnt,
+        dec_cnt = dec_z4_cnt + dec_z5_cnt + dec_z6_cnt,
+        exp_dist = explosive_dist,
+        exp_cnt = acc_cnt + dec_cnt
+      ) %>% 
+      ungroup()
 
  
-metricNames <- c ("dur",
-  "dist", 
-  "hml_dist", "hml_cnt", 
-  "hsr_dist", "hsr_cnt",
-  "vel_z5_dist", "vel_z6_dist", "vel_z5_cnt", "vel_z6_cnt",
-  "exp_dist", "exp_cnt",
-  "acc_dist", "dec_dist", "acc_cnt", "dec_cnt")
+  metricNames <- c("dur",
+      "dist", "dsl", "vel_max",
+      "hml_dist", "hml_cnt", 
+      "hsr_dist", "hsr_cnt",
+      "vel_z5_dist", "vel_z6_dist", "vel_z5_cnt", "vel_z6_cnt",
+      "exp_dist", "exp_cnt",
+      "acc_cnt", "dec_cnt",
+      "acc_z3_cnt", "acc_z4_cnt", "acc_z5_cnt", "acc_z6_cnt", 
+      "dec_z3_cnt", "dec_z4_cnt", "dec_z5_cnt", "dec_z6_cnt", 
+      "hre", "hr_z5_dur", "hr_z6_dur", "si",
+      "impact_z3", "impact_z4", "impact_z5", "impact_z6",
+      "impact_z36", "impact_z46", "impact_z56", "impact_z6"
+    )
 
   ssSession <- ssDrill %>% 
+    mutate(
+      impact_z36 = impact_z3 + impact_z4 + impact_z5 + impact_z6,
+      impact_z46 = impact_z4 + impact_z5 + impact_z6, 
+      impact_z56 = impact_z5 + impact_z6, 
+      impact_z6 = impact_z6
+    ) %>% 
     select(
       drill_date, sess_type, session_title,
       drill_start_time, drill_end_time,
       name_display, position,
       dur,
-      dist, 
+      dist, dsl,
       hml_dist, hml_cnt, 
       hsr_dist, hsr_cnt,
       vel_z5_dist, vel_z6_dist, vel_z5_cnt, vel_z6_cnt,
       exp_dist, exp_cnt,
-      acc_dist, dec_dist, acc_cnt, dec_cnt
+      acc_cnt, dec_cnt,
+      acc_z3_cnt, acc_z4_cnt, acc_z5_cnt, acc_z6_cnt, 
+      dec_z3_cnt, dec_z4_cnt, dec_z5_cnt, dec_z6_cnt, 
+      hre, hr_z5_dur, hr_z6_dur,
+      mp_avg, si, vel_max,
+      impact_z3, impact_z4, impact_z5, impact_z6,
+      impact_z36, impact_z46, impact_z56, impact_z6
     ) %>% 
     group_by(drill_date, sess_type, session_title, name_display, position) %>%
     summarise(.groups = 'keep', 
+      mp_avg = {
+        mp1 <- mp_avg * dur 
+        mp2 <- sum(mp1)
+        dur1 <- sum(dur)
+        mp2 / dur1
+      },
+      vel_max = max(vel_max),
       across(all_of(metricNames), sum),
       session_start_time = sort(drill_start_time, decreasing = F) %>% .[1],
       session_end_time = sort(drill_end_time, decreasing = T) %>% .[1]
     ) %>%
     ungroup() %>% 
     rename(dur_drill = dur) %>% 
-    mutate(dur_session = (session_end_time - session_start_time) %>% as.numeric() / 60)
-  
-#Get Camp Planner Data - 
-
-#Create plotl.y - 
-  #should i move this to a function?
-
-
-
-```
-
-# Camp Overview {data-orientation="rows"}
-
-Inputs {.sidebar}
--------------------------------------
-
-```{r}
-# shiny inputs defined here
-```
-
-Column
--------------------------------------
-
-### Chart 1 
-
-```{r message=FALSE, warning=FALSE}
-
-  #Create Plotly Of Camp
-
-  mNames <- c("dur_drill","dist","hml_dist", "hsr_dist", "vel_z6_dist", "exp_dist", "acc_cnt", "dec_cnt")
-
- ssTeam <- ssSession %>% 
-    filter(position != 'GK') %>% 
-    select(drill_date, sess_type, session_title, all_of(mNames)) %>% 
-    pivot_longer(cols = mNames, names_to = 'metric') %>% 
-    group_by(drill_date, sess_type, session_title, metric) %>% 
-    summarise(.groups = 'keep',
-      ci = list(mean_cl_boot(value))
-    ) %>%
-    unnest(ci) %>% 
-    rename(mean=y, lwr=ymin, upr=ymax) 
- 
-  ssPosition <- ssSession %>% 
-    select(drill_date, sess_type, session_title, position, all_of(mNames)) %>% 
-    pivot_longer(cols = mNames, names_to = 'metric') %>% 
-    group_by(drill_date, sess_type, session_title, position, metric) %>% 
-    summarise(.groups = 'keep',
-      ci = list(mean_cl_boot(value))
-    ) %>%
-    unnest(ci) %>% 
-    rename(mean=y, lwr=ymin, upr=ymax)
-  
-  gg <- ssTeam %>% 
     mutate(
-      drill_date = factor(drill_date)
+      dur_session = (session_end_time - session_start_time) %>% as.numeric() / 60,
+      hr_z56_dur = hr_z5_dur + hr_z6_dur
+    )  %>% 
+    mutate(
+      name_last = str_replace(name_display, ' ', replacement = "_") %>% str_split(., "_", simplify = T) %>% .[,2]
     ) %>% 
-    ggplot(data = .) +
-      geom_col(aes(x = drill_date, y = mean), width = .3) +
-      geom_errorbar(aes(x = drill_date, y = mean, ymin = lwr, ymax = upr), width = .1) +
-      geom_rect(
-        aes(
-          xmin = as.numeric(drill_date)-.2,
-          xmax = as.numeric(drill_date)+.2,
-          ymin = mean*1.1,
-          ymax = mean*.9
-        ),
-        alpha = .25,
-        width = .4
-      ) +
-      facet_grid(rows = vars(metric), scales = 'free_y')
+    left_join(x = ., y = scoreInput, by = c("name_last" = "name_last")) %>% 
+    mutate(
+      extensive_score = calc_extensive_score(
+        dist = dist, 
+        dist_game = score_dist, 
+        dur = dur_drill, 
+        dist_min_game = score_dist_min,
+        mp_avg = mp_avg,
+        mp_avg_game = score_mp_avg,
+        hml_dist = hml_dist,
+        hml_dist_game = score_hml_dist
+      ),
+      extensive_load = calc_load_scale(extensive_score),
+      speed_score = calc_speed_score(
+        dur = dur_drill, 
+        vel_z5_dist = vel_z5_dist, 
+        vel_z6_dist = vel_z6_dist, 
+        hml_dist = hml_dist, 
+        si = si, 
+        vel_z6_dist_game = score_vel_z6_dist, 
+        hml_dist_game = score_hml_dist, 
+        vel_z56_dist_game = score_hsr_dist, 
+        si_game = score_si, 
+        hml_dist_min_game = score_hml_dist_min, 
+        vel_z56_dist_min_game = score_hsr_dist_min, 
+        si_min_game = score_si_min
+      ),
+      speed_load = calc_load_scale(speed_score),
+      muscle_score = calc_muscle_score(
+        dur = dur_drill,
+        explosive_dist = exp_dist,
+        hml_dist = hml_dist,
+        dsl = dsl,
+        acc_z3_cnt = acc_z3_cnt,
+        acc_z4_cnt = acc_z4_cnt,
+        acc_z5_cnt = acc_z5_cnt,
+        acc_z6_cnt = acc_z6_cnt,
+        dec_z3_cnt = dec_z3_cnt,
+        dec_z4_cnt = dec_z4_cnt,
+        dec_z5_cnt = dec_z5_cnt,
+        dec_z6_cnt = dec_z6_cnt,
+        explosive_dist_game = score_exp_dist,
+        hml_dist_min_game = score_hml_dist_min,
+        dsl_game = score_dsl,
+        dsl_min_game = score_dsl_min,
+        acc_z3456_cnt_game = score_acc_z36_cnt,
+        acc_z456_cnt_game = score_acc_z46_cnt,
+        dec_z3456_cnt_game = score_dec_z36_cnt,
+        dec_z456_cnt_game = score_dec_z46_cnt
+      ),
+      muscle_load = calc_load_scale(muscle_score),
+      cv_score = calc_cv_score(
+        dur = dur_drill,
+        hre = hre,
+        hr_z5_dur = hr_z5_dur,
+        hr_z6_dur = hr_z6_dur,
+        hre_game = score_hre,
+        hre_min_game = score_hre_min,
+        hr_z56_dur_game = score_hr_z56_dur,
+        hr_z6_dur_game = score_hr_z6_dur
+      ),
+      cv_load = calc_load_scale(cv_score),
+      total_score = (speed_load + extensive_load + muscle_load + cv_load)/4,
+      total_load = calc_load_scale(total_score)
+    ) %>% 
+    left_join(., rpe, by = c("name_last" = "Last Name", "drill_date" = "Date")) 
+
+  #Get Camp Planner Data - 
   
-  gg %>% ggplotly()
+
+```
+
+---
+title: `r pageTitle`
+---
+
+
+Daily Training Report {data-orientation=column}
+=====================================
+
+```{r, include=FALSE}
+
+  #This section sets up data for the Daily Training Report 
+
+  #Render a barchart for formattable
+  bar_chart <- function(label, width = "100%", height = "12px", fill = "#00bfc4", background = NULL) {
+    bar <- div(style = list(background = fill, width = width, height = height))
+    chart <- div(style = list(flexGrow = 1, marginLeft = "6px", background = background), bar)
+    div(style = list(display = "flex", alignItems = "center"), label, chart)
+  }
+
+  load_score_color_picker <- function(value){
+    
+      if (is.na(value)) return(NA)
+    
+      if (value >= 5) {
+        "rgb(215,25,28)" 
+      } else if (value >= 4) {
+        "rgb(253,174,97)"
+      } else if (value >= 3) {
+        "rgb(255,255,191)" 
+      } else if (value >= 2) {
+        "rgb(166,217,106)" 
+      } else if (value >= 1) {
+        "rgb(26,150,65)" 
+      } else {
+        NA
+      }
+  
+  }
+
+  ssDTR <- ssSession %>% 
+    filter(position != 'GK') %>% 
+    filter(drill_date == sessionDate) %>% 
+    rename(dur = dur_drill) %>% 
+    mutate(
+      name_display = str_replace(name_display, ' ', replacement = "_") %>% str_split(., "_", simplify = T) %>% .[,2],
+      acc_dec_cnt = acc_cnt + dec_cnt,
+      hml_dist = round(hml_dist,0),
+      dist_min = round(dist / dur,0),
+      dsl = round(dsl,0),
+      dur = round(dur,0),
+      hr_z56_dur = round(hr_z56_dur, 0),
+      hre = round(hre,0),
+      rpe = `RPE Adjusted`
+    ) %>% 
+    select(
+      position,
+      name_display, 
+      dur, 
+      dist, 
+      dist_min,
+      extensive_load,
+      hml_dist,
+      hsr_dist,
+      vel_z6_dist,
+      speed_load,
+      exp_dist,
+      dsl,
+      muscle_load,
+      hr_z56_dur,
+      hr_z6_dur,
+      hre,
+      cv_load,
+      total_load,
+      rpe
+    )
+  
+  FB_height <- ssDTR %>% filter(position == 'FB') %>% pull(name_display) %>% unique() %>% length() %>% {. * 30 + 140}
+  CB_height <- ssDTR %>% filter(position == 'CB') %>% pull(name_display) %>% unique() %>% length()  %>% {. * 30 + 140}
+  CM_height <- ssDTR %>% filter(position == 'CM') %>% pull(name_display) %>% unique() %>% length() %>% {. * 30 + 140}
+  AM_height <- ssDTR %>% filter(position == 'AM') %>% pull(name_display) %>% unique() %>% length()  %>% {. * 30 + 140}
+  WAM_height <- ssDTR %>% filter(position == 'WAM') %>% pull(name_display) %>% unique() %>% length()  %>% {. * 30 + 140}
+  FWD_height <- ssDTR %>% filter(position == 'FWD') %>% pull(name_display) %>% unique() %>% length() %>% {. * 30 + 140}
+  Team_height <- ssDTR %>% pull(name_display) %>% unique() %>% length() %>% {. * 30 + 120}
+  
+  js_header <- function(subLabel) {
+    JS(paste0("function(colInfo) {return colInfo.column.name + '<div style=\"color: #999; font-size: 10px\">",subLabel,"</div>'}"))
+  }
+  
+create_DTR_reacttable <- function(x, positionName) { 
+  
+  fill <- "#18233F"
+  color <- "#fff" 
+
+  x %>% 
+    reactable(
+      data = .,
+      compact = T,
+      pagination = F,
+      bordered = T,
+      defaultColDef = colDef( 
+        cell = function(value, index, name) {
+          width <- paste0(value / max(x[[name]]) * 100, "%")
+          padMax <- x[[name]] %>% nchar() %>% max()
+          value <- format(value, width = padMax, justify = "right")
+          bar_chart(value, width = width, fill = fill, background = "#e1e1e1")
+        },
+        footer = function(values, name) {
+          value <- mean(values) %>% round(.,0)
+          width <- paste0(value / max(values) * 100, "%")
+          padMax <- values %>% nchar() %>% max()
+          value <- format(value, width = padMax, justify = "right")
+          bar_chart(value, width = width, fill = fill, background = "#e1e1e1")
+        },
+        headerStyle = list(
+          fontWeight = 700, 
+          fontSize = 12, 
+          textAlign = "left"
+        ),
+        style = list(
+          fontFamily = "monospace", 
+          fontWeight = 400, 
+          fontSize = 14, 
+          color = 'black', 
+          whiteSpace = "pre", 
+          borderRight = "1px solid rgba(0, 0, 0, 0.1)"
+        ),
+        footerStyle = list(
+          fontFamily = "monospace", 
+          fontWeight = 700, 
+          fontSize = 14, 
+          color = 'black', 
+          whiteSpace = "pre", 
+          borderRight = "1px solid rgba(0, 0, 0, 0.1)"
+        ),
+        format = colFormat(digits = 0),
+        html = T
+      ),
+      columns = list(
+        name_display = colDef( 
+          name = positionName,
+          minWidth = 100,
+          cell = function(value) value,
+          align = 'left',
+          footer = glue("Average:"),
+          style = list(fontFamily = 'Arial', fontSize = 12)
+        ),
+        dur = colDef(
+          name = "Working Time", 
+          align = 'center',
+          header = js_header("(min)"),
+          minWidth = 60,
+          cell = function(value) value,
+          footer = function(values) mean(values) %>% round(.,0)
+        ),
+        dist = colDef(
+          name = "   Total Distance   ", 
+          header = js_header("(m)"),
+          align = 'left',
+          minWidth = 85
+        ),
+        dist_min = colDef(
+          name = "Dist Per Min", 
+          header = js_header("(m/min)"),
+          align = 'left',
+          minWidth = 85
+        ),
+        extensive_load = colDef(
+          name = "Ext Load", 
+          header = js_header("(au)"),
+          cell = function(value){div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)},
+          footer = function(values){
+            value <- mean(values) %>% round(.,0)
+            div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)
+          },
+          align = 'center',
+          width = 55
+        ),
+        hml_dist = colDef(
+          name = "Intensive Dist", 
+          header = js_header("(m > 25.5 w/kg)"),
+          align = 'left',
+          minWidth = 85
+        ),
+        hsr_dist = colDef(
+          name = "High Int Dist", 
+          header = js_header("(m > 5.5 m/s)"),
+          align = 'left',
+          minWidth = 85
+        ),
+        vel_z6_dist = colDef(
+          name = "Sprint Dist", 
+          header = js_header("(m > 7.0 m/s)"),
+          align = 'left',
+          minWidth = 85
+        ),
+        speed_load = colDef(
+          name = "Speed Load", 
+          header = js_header("(au)"),
+          cell = function(value){div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)},
+          footer = function(values){
+            value <- mean(values) %>% round(.,0)
+            div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)
+          },
+          align = 'center',
+          width = 55
+        ),
+        exp_dist = colDef(
+          name = "Acc/Dec Dist", 
+          header = js_header("(m > ±3 m/s²)"),
+          align = 'left',
+          minWidth = 85
+        ),
+        dsl = colDef(
+          name = "Muscle Stress", 
+          header = js_header("(au)"),
+          align = 'left',
+          minWidth = 85
+        ),
+        muscle_load = colDef(
+          name = "Muscle Load", 
+          header = js_header("(au)"),
+          cell = function(value){div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)},
+          footer = function(values){
+            value <- mean(values) %>% round(.,0)
+            div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)
+          },
+          align = 'center',
+          width = 55
+        ),
+        hr_z56_dur = colDef(
+          name = "Time HR >AT", 
+          header = js_header("(min)"),
+          align = 'left',
+          minWidth = 85
+        ),
+        hr_z6_dur = colDef(
+          name = "Time HR >90%", 
+          header = js_header("(min)"),
+          align = 'left',
+          minWidth = 85
+        ),
+        hre = colDef(
+          name = "HR Exertion", 
+          header = js_header("(au)"),
+          align = 'left',
+          minWidth = 85
+        ),
+        cv_load = colDef(
+          name = "CV Load", 
+          header = js_header("(au)"),
+          cell = function(value){div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)},
+          footer = function(values){
+            value <- mean(values) %>% round(.,0)
+            div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)
+          },
+          align = 'center',
+          width = 55
+        ),
+        total_load = colDef(
+          name = "Total Load", 
+          header = js_header("(au)"),
+          cell = function(value){div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)},
+          footer = function(values){
+            value <- mean(values) %>% round(.,0)
+            div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)
+          },
+          align = 'center',
+          width = 55
+        ),
+        rpe = colDef(
+          name = "RPE Load", 
+          header = js_header("(au)"),
+          cell = function(value){div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)},
+          footer = function(values){
+            value <- mean(values) %>% round(.,0)
+            div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)
+          },
+          align = 'center',
+          width = 55
+        )
+      ),
+      columnGroups = list(
+        colGroup(name = "Extensive Metrics", columns = c("dist", "dist_min", "extensive_load")),
+        colGroup(name = "Speed Metrics", columns = c("hml_dist", "hsr_dist", "vel_z6_dist", "speed_load")),
+        colGroup(name = "Muscle Metrics", columns = c("exp_dist", "dsl", "muscle_load")),
+        colGroup(name = "Cardiovascular Metrics", columns = c("hr_z56_dur", "hr_z6_dur", "hre", "cv_load"))
+      )
+    )
+}
+
+```
+
+```{css, echo=FALSE}
+
+  .roundcorners {
+      text-align: center;
+      border-radius: 8px;
+      color: #000;
+      padding: 2px;
+      width: 45px;
+      height: 20px;
+    }
 
 
 ```
 
-# Session Overview {data-orientation="rows"}
-
-Inputs {.sidebar}
+row {data-height=`r FB_height`}
 -------------------------------------
 
-```{r}
-# shiny inputs defined here
+### Full Back
+
+```{r DTR FB, message=FALSE, warning=FALSE}
+
+  ssDTR %>% 
+    filter(position == "FB") %>% 
+    select(-position) %>% 
+    create_DTR_reacttable(., "Full Back")
+
 ```
 
-Row {data-height="150"}
+row {data-height=`r CB_height`}
 -------------------------------------
 
-### Chart 1
+### Center Back
+
+```{r DTR CB, message=FALSE, warning=FALSE}
+
+  ssDTR %>% 
+    filter(position == "CB") %>% 
+    select(-position) %>% 
+    create_DTR_reacttable(., "Center Back")
+
+```
+
+row {data-height=`r CM_height`}
+-------------------------------------
+
+### Center Midfield
+```{r DTR CM, message=FALSE, warning=FALSE}
+
+  ssDTR %>% 
+    filter(position == "CM") %>% 
+    select(-position) %>% 
+    create_DTR_reacttable(., "Center Midfield")
+
+```
+
+row {data-height=`r AM_height`}
+-------------------------------------
+
+### Attacking Midfield
+
+```{r DTR AM, message=FALSE, warning=FALSE}
+
+  ssDTR %>% 
+    filter(position == "AM") %>% 
+    select(-position) %>% 
+    create_DTR_reacttable(., "Attacking Midfield")
+
+```
+
+row {data-height=`r WAM_height`}
+-------------------------------------
+
+### Wide Attacking Midfield
+
+```{r DTR WAM, message=FALSE, warning=FALSE}
+
+  ssDTR %>% 
+    filter(position == "WAM") %>% 
+    select(-position) %>% 
+    create_DTR_reacttable(., "Wide Attacking Midfield")
+
+```
+
+row {data-height=`r FWD_height`}
+-------------------------------------
+
+### Forward
+
+```{r DTR FWD, message=FALSE, warning=FALSE}
+
+  ssDTR %>% 
+    filter(position == "FWD") %>% 
+    select(-position) %>% 
+    create_DTR_reacttable(., "Forward")
+
+```
+
+row {data-height=`r Team_height`}
+-------------------------------------
+
+### Team
+
+```{r DTR Team, message=FALSE, warning=FALSE}
+
+  ssDTR %>% 
+    select(-position) %>% 
+    create_DTR_reacttable(., "Team")
+
+```
+
+Session Overview
+=====================================
+
+```{r, include=FALSE}
+
+  drillColors <- ssDrill %>% 
+    filter(drill_date == sessionDate) %>% 
+    filter(drill_label != "") %>% 
+    select(drill_label) %>% 
+    unique() %>% 
+    mutate(drill_color =  brewer.pal(n(), "Paired"))
+
+```
+
+Row {data-height="175"}
+-------------------------------------
+
+### Duration Intensity Overview
 
 ```{r}
 
 # Create Drill Start Time -------------------------------------------------
+  
   timeChartData <- ssDrill %>% 
     filter(!is.na(drill_type)) %>%
     filter(position != 'GK') %>% 
+    filter(drill_date == sessionDate) %>%
     select(
       session_title,
       dist,
+      dur,
       drill_date, 
+      drill_label,
       drill_title,
       drill_type, 
       drill_variation,
@@ -189,43 +701,44 @@ Row {data-height="150"}
       drill_start_time, 
       drill_end_time
     ) %>% 
-    rowwise() %>% 
-    mutate(
-      drill_label = na.omit(c(drill_type, drill_variation, drill_num)) %>% as.vector() %>% paste(.,collapse = ' - ')
-    ) %>% 
-    select(
-      session_title, drill_date, drill_title, drill_label, dist, drill_start_time, drill_end_time
-    ) %>% 
+    mutate(dist_min = dist / dur) %>% 
     group_by(session_title, drill_date, drill_title, drill_label) %>% 
     summarise(.groups = 'keep',
-      dist = mean(dist, na.rm = T),
+      dist_min = mean(dist_min, na.rm = T),
       drill_start_time = drill_start_time %>% sort(decreasing = T) %>% .[1],
       drill_end_time = drill_end_time %>% sort(decreasing = F) %>% .[1]
     ) %>% 
     ungroup() %>% 
+    arrange(drill_start_time) %>% 
     mutate(
-      drill_mean_time = (drill_start_time + drill_end_time) / 2
-    )
-  
+      drill_mean_time = (drill_start_time + drill_end_time) / 2,
+      drill_label = factor(drill_label, levels = unique(drill_label))
+    ) 
+
   gg <- timeChartData %>% 
-    filter(drill_date == '2021-03-23') %>%
-    ungroup() %>%
     ggplot() +
       geom_rect(aes(
         xmin = drill_start_time, 
         xmax = drill_end_time, 
         ymin = 0, 
-        ymax = dist, 
+        ymax = dist_min, 
         fill = drill_label,
-        group = drill_title
-      ))
+        group = drill_label
+      )) + 
+      ylab("m / min") +
+      theme(
+        axis.text=element_text(size=6),
+        legend.position='none'
+      ) +
+      scale_fill_manual(values = drillColors$drill_color)
       
   
   ggplotly(gg)
      
+
 ```
 
-### Chart 2
+### Active / Passive Time
 
 ```{R}
 
@@ -266,13 +779,28 @@ x <- ssDrill %>%
 
 
 gg <- x %>% 
-  filter(drill_date == '2021-03-23') %>% 
-  select(session_title, inactiveTimeMin, activeTimeMin, activeTimePct) %>% 
-  pivot_longer(cols = c(activeTimeMin, inactiveTimeMin)) %>% 
-  ggplot() + 
-    geom_col(position = 'stack', aes(x = value, y = session_title, fill = name)) 
+  filter(drill_date == sessionDate) %>% 
+  select(session_title, inactiveTimeMin, activeTimeMin) %>% 
+  rename(`Working Time` = activeTimeMin, `Non-Working Time` = inactiveTimeMin) %>% 
+  pivot_longer(cols = c(`Working Time`, `Non-Working Time`)) %>% 
+  mutate(label =  glue("{value} min \n {name}")) %>% 
+  ggplot(aes(x = round(value,0), y = session_title, fill = name, label = label)) + 
+    geom_col(position = 'stack') +
+    geom_text(position = position_stack(vjust = .5), size = 3) +
+    theme(
+      axis.title.y=element_blank(),
+      axis.text.y=element_blank(),
+      axis.ticks.y=element_blank()
+    ) +
+    xlab("Duration Minutes") +
+    theme(
+      axis.text=element_text(size=4),
+      legend.position='none'
+    ) +
+    scale_color_brewer(palette = "Dark2")
 
-ggplotly(gg)
+    
+  ggplotly(gg) 
 
 
 ```
@@ -280,17 +808,38 @@ ggplotly(gg)
 Row
 -------------------------------------
 
-### Chart 3
+### Metric Breakdown
 
 ```{r}
 
-mNames <- c("dur", "dist","hml_dist", "hsr_dist", "vel_z6_dist", "exp_dist", "acc_cnt", "dec_cnt")
+mNames <- c("Working Time", "Total Dist","Intensive Dist", "High Int Dist", "Explosive Dist", "Sprint Dist", "Acc Dec Count")
 
 ssDrill2 <- ssDrill %>% 
   filter(position != 'GK') %>% 
-  select(session_title, session_date, drill_name_full, drill_name_short, position, name_display, dur, all_of(mNames)) %>% 
-  pivot_longer(cols = mNames, names_to = 'metric') %>% 
-  group_by(session_date, session_title, drill_name_full, drill_name_short, metric) %>% 
+  filter(!is.na(drill_type)) %>%
+  filter(session_date == sessionDate) %>%
+  mutate(
+    drill_name_short = factor(drill_name_short, levels = 
+                                ssDrill %>% filter(session_date == sessionDate) %>% 
+                                arrange(drill_start_time) %>% 
+                                pull(drill_name_short) %>% 
+                                unique()
+                              ), 
+    acc_dec_cnt = acc_cnt + dec_cnt
+  ) %>% 
+  rename(
+    `Working Time` = dur,
+    `Total Dist` = dist,
+    `Intensive Dist` = hml_dist,
+    `High Int Dist` = hsr_dist,
+    `Explosive Dist` = exp_dist,
+    `Sprint Dist` = vel_z6_dist,
+    `Acc Dec Count` = acc_dec_cnt
+  ) %>% 
+  select(session_date, session_title, drill_start_time, drill_name_full, drill_name_short, all_of(mNames)) %>% 
+  pivot_longer(cols = all_of(mNames), names_to = 'metric') %>% 
+  mutate(metric = factor(metric, levels = mNames)) %>% 
+  group_by(session_date, session_title, drill_start_time, drill_name_full, drill_name_short, metric) %>% 
   summarise(.groups = 'keep', ci = list(mean_cl_boot(value))) %>%
   unnest(ci) %>% 
   rename(mean=y, lwr=ymin, upr=ymax) 
@@ -306,81 +855,475 @@ ssTeam <- ssDrill2 %>%
   mutate(target = runif(1, min = mean * .75, mean * 1.25) %>% round(., 1)) %>% 
   ungroup()
 
-gg <- ssDrill2 %>% 
-  filter(session_date == '2021-03-22') %>% 
-  ungroup() %>% 
-  ggplot() +
-    geom_col(aes(x = mean, y = metric, fill = drill_name_short)) +
-    geom_segment(
-      data = ssTeam %>% filter(session_date == '2021-03-22'),
-      aes(
-        y = .50,
-        yend = 1.50,
-        x = target,
-        xend = target
-      ),
-      show.legend = TRUE,
-      linetype = 'dotted',
-    ) +
-    facet_wrap(metric ~ ., scales="free", ncol = 1) +
-    theme(
-      strip.background = element_blank(),
-      strip.text.x = element_blank(),
-      axis.title.x = element_blank(),
-      axis.title.y = element_blank(),
-      legend.title = element_blank()
+  make_plot <- function(data, drillColors) {
+
+     showLegend <- data$showLegend %>% unique()
+     
+     data %>% 
+       arrange(drill_name_short) %>%
+        plot_ly(
+         data = ., x = ~mean, y = ~metric, 
+         color = ~factor(drill_name_short), 
+         colors = drillColors,
+         legendgroup = ~drill_name_short
+        ) %>%
+        add_trace(type="bar", legendgroup = ~drill_name_short,  showlegend = showLegend) %>%
+        layout(barmode = "stack")
+    
+  }
+
+  x <- ssDrill2 %>% 
+    mutate(
+      showLegend = ifelse(metric == ssDrill2$metric %>% unique() %>% .[1], T, F)
+    ) %>% 
+    group_by(metric) %>% 
+    group_split() %>% 
+    map(.x = ., .f = ~make_plot(.x, drillColors$drill_color))
+  
+
+  x %>% subplot(., nrows = 7, shareX = FALSE, shareY = FALSE)
+  
+
+```
+
+Camp Overview
+=====================================
+
+row {data-height=2400}
+-------------------------------------
+
+### Team Average Overview
+
+```{r message=FALSE, warning=FALSE}
+
+  #Create Plotly Of Camp
+
+  mNames <- c("Working Time", "Total Dist","Intensive Dist", "High Int Dist", "Explosive Dist", "Sprint Dist", "Acc Dec Count")
+
+ ssTeam <- ssSession %>% 
+    filter(position != 'GK') %>% 
+    mutate(acc_dec_cnt = acc_cnt + dec_cnt) %>% 
+    rename(
+      `Working Time` = dur_drill,
+      `Total Dist` = dist,
+      `Intensive Dist` = hml_dist,
+      `High Int Dist` = hsr_dist,
+      `Explosive Dist` = exp_dist,
+      `Sprint Dist` = vel_z6_dist,
+      `Acc Dec Count` = acc_dec_cnt
+    ) %>% 
+    select(drill_date, sess_type, session_title, all_of(mNames)) %>%
+    pivot_longer(cols = all_of(mNames), names_to = 'metric') %>% 
+    mutate(metric = factor(metric, levels = mNames)) %>% 
+    group_by(drill_date, sess_type, session_title, metric) %>% 
+    summarise(.groups = 'keep',
+      ci = list(mean_cl_boot(value))
+    ) %>%
+    unnest(ci) %>% 
+    rename(mean=y, lwr=ymin, upr=ymax) 
+
+  p <- ssTeam %>% 
+    group_by(metric) %>% 
+    group_split() %>% 
+    map(.x = ., .f = function(.x){
+      
+      yTitle <- .x$metric %>% unique() 
+
+      .x %>% 
+        plot_ly() %>% 
+        add_trace(
+            x = ~drill_date, 
+            y = ~round(mean,0),
+            marker = list(color = '#18233F'),
+            type = "bar",
+            showlegend = F,
+            hovertext = ~glue("
+              Metric: {metric}
+              Type: {sess_type}
+            "),
+            error_y = list(
+              type = "data",
+              array = ~c(round(lwr-mean,1),round(upr-mean,1)),
+              color = "grey"
+            )
+          ) %>% 
+          layout(
+            yaxis = list(title = yTitle),
+            xaxis = list(title = "")
+          )
+        
+    })
+   
+   subplot(p, nrows = length(p), shareY = F, titleY = T)
+
+  
+```
+
+GK Daily Training Report
+=====================================
+
+row 
+-------------------------------------
+
+### Team Average Overview
+
+```{r message=FALSE, warning=FALSE}
+
+  create_dtr_gk_reacttable <- function(x) { 
+    
+    positionName <- "Goal Keeper"
+    
+    fill <- "#18233F"
+    color <- "#fff" 
+  
+    x %>% 
+      select(-position) %>% 
+      reactable(
+        data = .,
+        compact = T,
+        pagination = F,
+        bordered = T,
+        defaultColDef = colDef(
+          cell = function(value, index, name) {
+            width <- paste0(value / max(x[[name]]) * 100, "%")
+            padMax <- x[[name]] %>% nchar() %>% max()
+            value <- format(value, width = padMax, justify = "right")
+            bar_chart(value, width = width, fill = fill, background = "#e1e1e1")
+          },
+          footer = function(values, name) {
+            value <- mean(values) %>% round(.,0)
+            width <- paste0(value / max(values) * 100, "%")
+            padMax <- values %>% nchar() %>% max()
+            value <- format(value, width = padMax, justify = "right")
+            bar_chart(value, width = width, fill = fill, background = "#e1e1e1")
+          },
+          headerStyle = list(
+            fontWeight = 700,
+            fontSize = 12,
+            textAlign = "left"
+          ),
+          style = list(
+            fontFamily = "monospace",
+            fontWeight = 400,
+            fontSize = 14,
+            color = 'black',
+            whiteSpace = "pre",
+            borderRight = "1px solid rgba(0, 0, 0, 0.1)"
+          ),
+          footerStyle = list(
+            fontFamily = "monospace",
+            fontWeight = 700,
+            fontSize = 14,
+            color = 'black',
+            whiteSpace = "pre",
+            borderRight = "1px solid rgba(0, 0, 0, 0.1)"
+          ),
+          format = colFormat(digits = 0),
+          html = T
+        ),
+        columns = list(
+          name_display = colDef( 
+            name = positionName,
+            minWidth = 100,
+            cell = function(value) value,
+            align = 'left',
+            footer = glue("Average:"),
+            style = list(fontFamily = 'Arial', fontSize = 12)
+          ),
+          dur = colDef(
+            name = "Working Time",
+            align = 'center',
+            header = js_header("(min)"),
+            minWidth = 60,
+            cell = function(value) value,
+            footer = function(values) mean(values) %>% round(.,0)
+          ),
+          dist = colDef(
+            name = "   Total Distance   ",
+            header = js_header("(m)"),
+            align = 'left',
+            minWidth = 85
+          ),
+          vel_max = colDef(
+            name = "Max Speed",
+            header = js_header("(m/s)"),
+            align = 'left',
+            minWidth = 85
+          ),
+          hml_dist = colDef(
+            name = "Intensive Dist",
+            header = js_header("(m > 25.5 w/kg)"),
+            align = 'left',
+            minWidth = 85
+          ),
+          hsr_dist = colDef(
+            name = "High Int Dist",
+            header = js_header("(m > 5.5 m/s)"),
+            align = 'left',
+            minWidth = 85
+          ),
+          vel_z6_dist = colDef(
+            name = "Sprint Dist",
+            header = js_header("(m > 7.0 m/s)"),
+            align = 'left',
+            minWidth = 85
+          ),
+          exp_dist = colDef(
+            name = "Acc/Dec Dist",
+            header = js_header("(m > ±3 m/s²)"),
+            align = 'left',
+            minWidth = 85
+          ),
+          speed_load = colDef(
+            name = "Speed Load",
+            header = js_header("(au)"),
+            cell = function(value){div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)},
+            footer = function(values){
+              value <- mean(values) %>% round(.,0)
+              div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)
+            },
+            align = 'center',
+            width = 55
+          ),
+          dsl = colDef(
+            name = "Muscle Stress",
+            header = js_header("(au)"),
+            align = 'left',
+            minWidth = 85
+          ),
+          muscle_load = colDef(
+            name = "Muscle Load",
+            header = js_header("(au)"),
+            cell = function(value){div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)},
+            footer = function(values){
+              value <- mean(values) %>% round(.,0)
+              div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)
+            },
+            align = 'center',
+            width = 55
+          ),
+          impact_z46 = colDef(
+            name = "Impacts 4-6",
+            header = js_header("(au)"),
+            align = 'left',
+            minWidth = 85
+          ),
+          impact_z56 = colDef(
+            name = "Impacts 5-6",
+            header = js_header("(au)"),
+            align = 'left',
+            minWidth = 85
+          ),
+          impact_z6 = colDef(
+            name = "Impacts 6",
+            header = js_header("(au)"),
+            align = 'left',
+            minWidth = 85
+          ),
+          impact_stress = colDef(
+            name = "Impact Load",
+            header = js_header("(au)"),
+            cell = function(value){div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)},
+            footer = function(values){
+              value <- mean(values) %>% round(.,0)
+              div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)
+            },
+            align = 'center',
+            width = 55
+          ),
+          impact_load = colDef(
+            name = "Impact Load",
+            header = js_header("(au)"),
+            cell = function(value){div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)},
+            footer = function(values){
+              value <- mean(values) %>% round(.,0)
+              div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)
+            },
+            align = 'center',
+            width = 55
+          ),
+          total_load = colDef(
+            name = "Total Load",
+            header = js_header("(au)"),
+            cell = function(value){div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)},
+            footer = function(values){
+              value <- mean(values) %>% round(.,0)
+              div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)
+            },
+            align = 'center',
+            width = 55
+          ),
+          rpe = colDef(
+            name = "RPE Load",
+            header = js_header("(au)"),
+            cell = function(value){div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)},
+            footer = function(values){
+              value <- mean(values) %>% round(.,0)
+              div(class = "roundcorners", style = list(background = load_score_color_picker(value)), value)
+            },
+            align = 'center',
+            width = 55
+          )
+        ),
+        columnGroups = list(
+          colGroup(name = "Speed Metrics", columns = c("vel_max", "dist", "hsr_dist", "vel_z6_dist", "hml_dist", "exp_dist", "speed_load")),
+          colGroup(name = "Muscle Metrics", columns = c("dsl", "muscle_load")),
+          colGroup(name = "Impact Metrics", columns = c("impact_z46", "impact_z56", "impact_z6", "impact_load"))
+        )
+      )
+}
+
+  mNames <- c(
+    "dur_drill", 
+    "vel_max",
+    "dist",
+    "hsr_dist", 
+    "vel_z6_dist", 
+    "hml_dist", 
+    "exp_dist", 
+    "dsl",
+    "impact_z46",
+    "impact_z56",
+    "impact_z6"
+  )
+  
+  ssGoalKeeper <- ssSession %>% 
+    filter(position == 'GK') %>% 
+    filter(drill_date == sessionDate) %>% 
+    rename(dur = dur_drill) %>% 
+    mutate(
+      name_display = str_replace(name_display, ' ', replacement = "_") %>% str_split(., "_", simplify = T) %>% .[,2],
+      acc_dec_cnt = acc_cnt + dec_cnt,
+      hml_dist = round(hml_dist,0),
+      dist_min = round(dist / dur,0),
+      dsl = round(dsl,0),
+      dur = round(dur,0),
+      rpe = `RPE Adjusted`, 
+      speed_score = calc_gk_speed_score(dur = dur, si = si, vel_z5_dist = vel_z5_dist, vel_z6_dist = vel_z6_dist, mp_avg = mp_avg, exp_dist = exp_dist),
+      speed_load = calc_load_scale(speed_score),
+      muscle_score = calc_gk_muscle_score(dur = dur, exp_dist = exp_dist, dsl = dsl, acc_z4_cnt = acc_z4_cnt, acc_z5_cnt = acc_z5_cnt, acc_z6_cnt = acc_z6_cnt, dec_z4_cnt = dec_z4_cnt, dec_z5_cnt = dec_z5_cnt, dec_z6_cnt = dec_z6_cnt),
+      muscle_load = calc_load_scale(muscle_score),
+      impact_score = calc_gk_impact_score(impact_z3 = impact_z3, impact_z4 = impact_z4, impact_z5 = impact_z5, impact_z6 = impact_z6),
+      impact_load = calc_load_scale(impact_score),
+      total_load = (muscle_load + speed_load + impact_load ) / 3
+    ) %>% 
+    select(
+      position,
+      name_display, 
+      dur, 
+      dur, 
+      vel_max,
+      dist,
+      hsr_dist, 
+      vel_z6_dist, 
+      hml_dist, 
+      exp_dist, 
+      speed_load,
+      dsl,
+      muscle_load,
+      impact_z46,
+      impact_z56,
+      impact_z6,
+      impact_load,
+      total_load,
+      rpe
+    )
+  
+   ssGoalKeeper %>% create_dtr_gk_reacttable()
+
+ 
+```
+
+GK Camp Overview
+=====================================
+
+row {data-height=4800}
+-------------------------------------
+
+### Goal Keeper Overview
+
+```{r message=FALSE, warning=FALSE}
+
+  #Create Plotly Of Camp
+
+   mNames <- c(
+      "Working Time",
+      "Max Speed",
+      "Total Dist",
+      "High Int Dist",
+      "Sprint Dist",
+      "Intensive Dist",
+      "Muscle Load",
+      "Acc/Dec Dist",
+      "Impacts z4-6",
+      "Impacts z5-6",
+      "Impacts z6"
     )
 
-ggplotly(gg)
+  ssGoalKeeper <- ssSession %>% 
+    filter(position == 'GK') %>%
+    mutate(acc_dec_cnt = acc_cnt + dec_cnt) %>%
+    rename(
+      `Athlete Name` = name_display,
+      `Working Time` = dur_drill,
+      `Max Speed` = vel_max,
+      `Total Dist` = dist,
+      `High Int Dist` = hsr_dist,
+      `Sprint Dist` = vel_z6_dist,
+      `Intensive Dist` = hml_dist,
+      `Muscle Load` = dsl,
+      `Acc/Dec Dist` = exp_dist,
+      `Impacts z4-6` = impact_z46,
+      `Impacts z5-6` = impact_z56,
+      `Impacts z6` = impact_z6
+    ) %>%
+    select(`Athlete Name`, drill_date, sess_type, session_title, all_of(mNames)) %>% 
+    pivot_longer(., cols = all_of(mNames), names_to = 'metric') 
+  
+    ssGK <- list()
+    
+    ssGK$time <- ssGoalKeeper %>% filter(metric == 'Working Time') %>% SharedData$new(., ~`Athlete Name`, group = "GK Athlete")
+    ssGK$vel <- ssGoalKeeper %>% filter(metric == 'Max Speed') %>% SharedData$new(., ~`Athlete Name`, group = "GK Athlete")
+    ssGK$dist <- ssGoalKeeper %>% filter(metric == 'Total Dist') %>% SharedData$new(., ~`Athlete Name`, group = "GK Athlete")
+    ssGK$hsr <- ssGoalKeeper %>% filter(metric == 'High Int Dist') %>% SharedData$new(., ~`Athlete Name`, group = "GK Athlete")
+    ssGK$sprint <- ssGoalKeeper %>% filter(metric == 'Sprint Dist') %>% SharedData$new(., ~`Athlete Name`, group = "GK Athlete")
+    ssGK$hml <- ssGoalKeeper %>% filter(metric == 'Intensive Dist') %>% SharedData$new(., ~`Athlete Name`, group = "GK Athlete")
+    ssGK$dsl <- ssGoalKeeper %>% filter(metric == 'Muscle Load') %>% SharedData$new(., ~`Athlete Name`, group = "GK Athlete")
+    ssGK$exp <- ssGoalKeeper %>% filter(metric == 'Acc/Dec Dist') %>% SharedData$new(., ~`Athlete Name`, group = "GK Athlete")
+    ssGK$iz46 <- ssGoalKeeper %>% filter(metric == 'Impacts z4-6') %>% SharedData$new(., ~`Athlete Name`, group = "GK Athlete")
+    ssGK$iz56 <- ssGoalKeeper %>% filter(metric == 'Impacts z5-6') %>% SharedData$new(., ~`Athlete Name`, group = "GK Athlete")
+    ssGK$iz6 <- ssGoalKeeper %>% filter(metric == 'Impacts z6') %>% SharedData$new(., ~`Athlete Name`, group = "GK Athlete")
+     
+    make_gk_plot <- function(df){
+      plot_ly(data = df) %>% 
+        add_trace(
+            x = ~drill_date, 
+            y = ~round(value,0),
+            marker = list(color = '#18233F'),
+            type = "bar",
+            showlegend = F,
+            hovertext = ~glue("
+              Athlete: {`Athlete Name`}
+              Metric: {metric}
+              Type: {sess_type}
+            ")
+          ) %>% 
+          layout(
+            title = ~unique(`Athlete Name`),
+            yaxis = list(title = ~unique(metric)),
+            xaxis = list(title = "")
+          )
+    }
+    
+    p <- map(.x = ssGK, .f = ~make_gk_plot(.x))
+    f <- filter_select("athleteName", "Athlete Name", ssGK$time, ~`Athlete Name`, multiple = F)
 
+   
+    bscols(widths = c(12), list(
+      bscols(widths = c(3,NA),f),
+      bscols(widths = c(12),p)
+    ))
+
+
+  
 ```
-
-
-# Drill Overview {data-orientation="rows"}
-
-Inputs {.sidebar}
--------------------------------------
-
-
-Row
--------------------------------------
-
-### Drill Interval
-
-```{r}
-  
-
-mNames <- c("dist","hml_dist", "hsr_dist", "vel_z6_dist", "exp_dist", "acc_cnt", "dec_cnt")
-
-ssDrill2 <- ssDrill %>% 
-  filter(position != 'GK') %>% 
-  filter(session_date == '2021-03-22') %>%
-  filter(drill_name_short == 'DP - 5V5+1N - 24X20 GGG_GGG') %>% 
-  select(drill_title, drill_name_short, drill_int, position, name_display, dur, all_of(mNames)) %>% 
-  pivot_longer(cols = mNames, names_to = 'metric') %>% 
-  ungroup() %>% 
-  mutate(value = value / dur)
-  
-
-gg <- ssDrill2 %>% 
-  ggplot() + 
-  geom_boxplot(aes(x = drill_int, y = value)) +
-  facet_wrap(facets = vars(metric),  scales = 'free') 
-
-ggplotly(gg)
-  
-  
-  
-
-  
-
-```
-
-### Chart 2
-
-Row
--------------------------------------
-
-### Chart 4
-
-### Chart 5
