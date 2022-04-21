@@ -1,0 +1,347 @@
+---
+title: "MatchReport"
+output:
+  flexdashboard::flex_dashboard:
+    logo: USSF-Primary48.png
+    vertical_layout: scroll
+    orientation: rows
+    css: mytheme.css
+editor_options:
+  chunk_output_type: console
+params:
+  pageTitle: "USA v Panama Mar-27-2022" 
+  matchName: "USA v Panama : 2022-03-27" 
+  matchDate: '2022-03-27' 
+  metricNameFull: c("dist", "hml", "hsr", "spr", "exp")
+---
+
+```{r setup, include=FALSE}
+
+  library(flexdashboard)
+  library(tidyverse)
+  library(shiny)
+  library(shinydashboard)
+  library(reactable)
+  library(plotly)
+  library(htmltools)
+  library(glue)
+  library(effectsize)
+  library(shinyWidgets)
+  library(crosstalk)
+  
+  visLoc <- "Match Report/vis"
+
+  match10hz <- readRDS(paste0(visLoc,'/match10hz.rds'))
+  
+  teamMatchDT <- readRDS(paste0(visLoc,'/teamMatchDT.rds'))
+  teamHalfDiffDT <- readRDS(paste0(visLoc,'/teamHalfDiffDT.rds'))
+  teamMatchPP <- readRDS(paste0(visLoc,'/teamMatchPP.rds'))
+  
+  athleteMatchPP <- readRDS(paste0(visLoc,'/athleteMatchPP.rds'))
+  athleteHalfDiffDT <- readRDS(paste0(visLoc,'/athleteHalfDiffDT.rds'))
+  # athleteHalfDT <- readRDS(paste0(visLoc,'/athleteHalfDT.rds'))
+  athleteMatchDT <- readRDS(paste0(visLoc,'/athleteMatchDT.rds'))
+  
+  athleteMatchDur <- readRDS(paste0(visLoc,'/athleteMatchDur.rds'))
+
+
+```
+
+---
+title: `r params$pageTitle`
+---
+
+# Match Report {data-orientation="column"}
+
+```{r, echo=F, eval = FALSE}
+
+mainReportDT <- readRDS(paste0(visLoc,'/mainReportDT.rds'))
+
+formation_433 <- function(data, FBLname, FBRname, CBLname, CBRname, CMname, WAMLname, WAMRname, AMLname, AMRname, FWDname, height, width) {
+
+  fluidPage(
+      
+      # c(10, 20, 10, 20, 10, 20, 10) %>% sum()
+      #WAM L
+      absolutePanel(
+        tags$div(WAMLname, style="text-align: center; font-weight: bold;"),
+        data %>% filter(name_display == WAMLname) %>% pull(dt), 
+        top = '7%', bottom = NULL, left = '10%', right = NULL, 
+        # width = width, height = height, 
+        draggable = F, fixed = F,
+        style = "border: none !important;"
+      ),
+      #FWD
+      absolutePanel(
+       tags$div(FWDname, style="text-align: center; font-weight: bold;"),
+        data %>% filter(name_display == FWDname) %>% pull(dt), 
+        top = '5%', bottom = NULL, left = '40%', right = NULL, 
+        # width = width, height = height,  
+        draggable = F, fixed = F,
+        style = "border: none !important;"
+      ),
+      #WAM R
+      absolutePanel(
+        tags$div(WAMRname, style="text-align: center; font-weight: bold;"),
+        data %>% filter(name_display == WAMRname) %>% pull(dt), 
+        top = '7%', bottom = NULL, left = NULL, right = '10%', 
+        # width = width, height = height, 
+        draggable = F, fixed = F,
+        style = "border: none !important;"
+      ),
+      
+      #c(17.5,20,2.5,20,2.5,,20,17.5) %>% sum()
+      #AM L
+      absolutePanel(
+        tags$div(AMLname, style="text-align: center; font-weight: bold;"),
+        data %>% filter(name_display == AMLname) %>% pull(dt), 
+        top = '37%', bottom = NULL, left = '15%', right = NULL, 
+        # width = width, height = height, 
+        draggable = F, fixed = F,
+        style = "border: none !important;"
+      ),
+      #AM R
+      absolutePanel(
+        tags$div(AMRname, style="text-align: center; font-weight: bold;"),
+        data %>% filter(name_display == AMRname) %>% pull(dt), 
+        top = '37%', bottom = NULL, left = NULL, right = '17.5%', 
+        # width = width, height = height,  
+        draggable = F, fixed = F,
+        style = "border: none !important;"
+      ),
+      
+      #c(40, 20, 40) %>% sum()
+      #CM
+      absolutePanel(
+        tags$div(CMname, style="text-align: center; font-weight: bold;"),
+        data %>% filter(name_display == CMname) %>% pull(dt),
+        top = '42%', bottom = NULL, left = '40%', right = NULL,
+        # width = width, height = height,
+        draggable = F, fixed = F,
+        style = "border: none !important;"
+      ),
+  
+      #c(4, 20, 4, 20, 4, 20, 4, 20, 4) %>% sum()
+      #FB L
+      absolutePanel(
+        tags$div(FBLname, style="text-align: center; font-weight: bold;"),
+        data %>% filter(name_display == FBLname) %>% pull(dt),
+        top = NULL, bottom = "4%", left = '4%', right = NULL,
+        # width = width, height = height,
+        draggable = F, fixed = F,
+        style = "border: none !important;"
+      ),
+      #CB L
+      absolutePanel(
+        tags$div(CBLname, style="text-align: center; font-weight: bold;"),
+        data %>% filter(name_display == CBLname) %>% pull(dt),
+        top = NULL, bottom = "0%", left = '28%', right = NULL,
+        # width = width, height = height, 
+        draggable = F, fixed = F,
+        style = "border: none !important;"
+      ),
+      #CB R
+      absolutePanel(
+        tags$div(CBRname, style="text-align: center; font-weight: bold;"),
+        data %>% filter(name_display == CBRname) %>% pull(dt),
+        top = NULL, bottom = "0%", left = NULL, right = '28%',
+        # width = width, height = height,
+        draggable = F, fixed = F,
+        style = "border: none !important;"
+      ),
+      #FB R
+      absolutePanel(
+        tags$div(FBRname, style="text-align: center; font-weight: bold;"),
+        data %>% filter(name_display == FBRname) %>% pull(dt),
+        top = NULL, bottom = "4%", left = NULL, right = '4%',
+        # width = width, height = height,
+        draggable = F, fixed = F,
+        style = "border: none !important;"
+      )
+      
+  )
+}
+
+shiny::tabsetPanel(
+  shiny::tabPanel(title = "Starters",
+     formation_433(data = mainReportDT,
+      FBLname = 'Antonee Robinson', 
+      FBRname = 'Deandre Yedlin', 
+      CBLname = 'Miles Robinson', 
+      CBRname = 'Walker Zimmerman', 
+      CMname = 'Tyler Adams', 
+      WAMLname = 'Christian Pulisic', 
+      WAMRname = 'Timothy Weah', 
+      AMLname = 'Kellyn Acosta', 
+      AMRname = 'Yunus Musah',
+      FWDname = 'Ricardo Pepi',
+      height = 550, width = 300
+    )             
+  ),
+  shiny::tabPanel(title = "Solutions",
+     formation_433(data = mainReportDT,
+      FBLname = "", 
+      FBRname = "Erik Palmer-Brown", 
+      CBLname = "Aaron Long", 
+      CBRname = "", 
+      CMname = "", 
+      WAMLname = "Jordan Morris", 
+      WAMRname = "", 
+      AMLname = "", 
+      AMRname = "",
+      FWDname = "Jordan Siebatcheu",
+      height = 550, width = 300
+    )             
+  )
+)
+
+
+```
+
+# Team Summary {data-orientation="column"}
+
+## row {data-height="800"}
+
+### Match Comparison
+
+```{r}
+
+ #Plotly Graph
+  teamMatchPP %>% layout(height = 800)
+
+
+```
+
+### Team Match Analytics
+
+```{r}
+
+tabsetPanel(type = "tabs",
+  tabPanel("Full Match",teamMatchDT %>% filter(match_half == 'Full') %>% pull(dt)),
+  tabPanel("First Half", teamMatchDT %>% filter(match_half == 'First Half') %>% pull(dt)),
+  tabPanel("Second Half", teamMatchDT %>% filter(match_half == 'Second Half') %>% pull(dt)),
+  tabPanel("Half Dif", teamHalfDiffDT)
+)
+
+```
+
+## row
+
+### Team Average Match Intensity
+
+```{r, out.width="100%", eval = FALSE}
+ 
+match10hz %>% filter(athlete_name == 'Team') %>% pull(p) %>% .[[1]]
+
+```
+
+# Athlete Summary {data-orientation="column"}
+
+## row {data-height="1000"}
+
+```{r, eval = TRUE}
+
+athleteNames <- athleteMatchDur %>%
+  ungroup() %>%
+  rename(athleteName = name_display) %>%
+  mutate(
+    position = factor(position, levels = c("FB", "CB", "CM", "AM", "WAM", "FWD")),
+    played_full = dur == full_match
+  ) %>%
+  select(position, athleteName, name_last, dur) %>%
+  arrange(., position, -dur, name_last) %>%
+  as.list()
+
+
+x <- do.call(tabsetPanel, c(id='t', pmap(athleteNames, function(position, athleteName, name_last, dur) {
+  
+  tryCatch(expr = {
+    
+    pp <- athleteMatchPP %>% filter(name_display == athleteName) %>% pull(pp) %>% .[[1]] %>% layout(height = 800)
+
+    DT1 <- athleteMatchDT %>% filter(match_half == 'Full', athlete == athleteName) %>% pull(dt)
+    DT2 <- athleteMatchDT %>% filter(match_half == 'First Half', athlete == athleteName) %>% pull(dt)
+    DT3 <- athleteMatchDT %>% filter(match_half == 'Second Half', athlete == athleteName) %>% pull(dt)
+    DT4 <- athleteHalfDiffDT %>% filter(athlete == athleteName) %>% pull(dt)
+
+    matchDur <- athleteMatchDT %>% filter(athlete == athleteName) %>% pull(data)
+    
+      tabPanel(
+        box_height = '20px',
+        title = HTML(glue('<b> {name_last} </b> <br/> <i> <font size="-2"> {position} [{round(dur,0)} min] </font> </i>')),
+          fluidPage(
+            tags$br(),
+            fluidRow(
+              column(width = 6,div(style = "height:800px;",
+                pp
+              )),
+              column(width = 6,div(style = "height:800px;",
+                tags$br(),
+                fluidRow(
+                  tabsetPanel(
+                    tabPanel("Full Match", DT1),
+                    tabPanel("First Half", DT2),
+                    tabPanel("Second Half", DT3),
+                    tabPanel("Half Diff", DT4)
+                  )
+                )
+              )
+            )),
+            tags$hr(),
+            fluidRow(
+              match10hz %>% filter(athlete_name == athleteName) %>% pull(p) %>% .[[1]]
+            )
+          )
+        )
+      }, error = function(e) {
+        print(e)
+      })
+  
+  
+  
+})))
+
+x
+
+
+```
+
+# Report Glossary
+
+### GPS Metric Overview
+
+------------------------------------------------------------------------
+
+**Total Distance** (TD)
+
+-   Distance covered in meters (m)
+
+**Total Intensive Distance** (TID)
+
+-   General Definition - Distance covered when running at and above a moderate intensity, plus distance covered when accelerating and decelerating quickly
+-   Technical Definition - Distance covered when metabolic power is greater than 25.5 watts per kilogram (m \> 25.5 W/kg)
+
+**High Speed Running Distance** (HSRD)
+
+-   General Definition - Distance covered when running distance covered when running at and above a moderate intensity,
+-   Technical Definition Distance covered when running speed is greater than 5.5 meters per second (m \> 5.5 m/s)
+
+**Acceleration / Deceleration Distance** (Ac/DcD)
+
+-   General Definition - Distance covered when accelerating and decelerating quickly
+-   Technical Definition - Distance covered when accelerating or decelerating greater than 25.5 watts per kilogram (m \> 25.5 W/kg)
+
+**Sprint Distance** (SprD)
+
+-   General Definition - Distance covered when sprinting approximately 80% of max speed
+-   Technical Definition - Distance covered when running speed is greater than 7.0 meters per second (m \> 7 m/s)
+
+**Acceleration Count** (Ac\#)
+
+-   General Definition - Count of quick accelerations
+-   Technical Definition - Count of events when acceleration is greater than 3 meters per second per second (count \> 3 m/s**²**)
+
+**Deceleration Count** (Dc\#)
+
+-   General Definition - Count of of quick deceleration
+-   Technical Definition - Count of events when deceleration is greater than -3 meters per second per second (count \> -3 m/s**²**)

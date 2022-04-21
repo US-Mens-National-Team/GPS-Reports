@@ -1070,7 +1070,6 @@
 
   calc_cv_score <- function(dur, hre, hr_z5_dur, hr_z6_dur, hre_game, hre_min_game, hr_z56_dur_game, hr_z6_dur_game){
 
-    #! Create system to check if values actually exsist? Need to evaluate HR qualities.
     hre_min <- hre / dur
     hr_z56_dur <- hr_z5_dur + hr_z6_dur
 
@@ -1082,6 +1081,17 @@
 
     x
 
+  }
+  
+  calc_total_score <- function(extensive_score, speed_score, muscle_score, cv_score) {
+    
+     total_score <- tibble(extensive_score, speed_score, muscle_score, cv_score) %>% rowMeans(., na.rm = TRUE)
+    
+    total_score[is.nan(total_score)] <- NA
+    
+    total_score
+    
+    
   }
 
   calc_load_scale <- function(score) {
